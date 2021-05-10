@@ -1,0 +1,185 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using MPI;
+
+namespace Matrix_MPI_Multiplication
+{
+    [Serializable]
+    struct element
+    {
+        public long[,] row, col; // submatricile matricei A (=row) si matricea B trimisa integral la toate procesele (=col)
+        public long l, lc, c; // l-nr de linii submatrice A pt proces i , lc=col A si lin B , c=nr coloane matrice B pt proces i
+    }
+    [Serializable]
+    struct result
+    {
+        public long[,] c;
+    }
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            using (new MPI.Environment(ref args))
+            {
+                long[,] c;
+                Intracommunicator comm = Communicator.world;
+                if (comm.Rank == 0)
+                {
+                    Console.WriteLine("Numar linii prima matrice:");
+                    long m = long.Parse(Console.ReadLine());
+                    Console.WriteLine("Numar coloane prima matrice si numar linii a doua matrice:");
+                    long n = long.Parse(Console.ReadLine());
+                    Console.WriteLine("Numar coloane a doua matrice:");
+                    long p = long.Parse(Console.ReadLine());
+                    long[,] a = new long[m, n];
+                    long[,] b = new long[n, p];
+                    Random r = new Random();
+
+                    // Afisare prima matrice
+                    Console.WriteLine("Prima matrice:");
+                    for (long i = 0; i < m; i++)
+                    {
+                        for (long j = 0; j < n; j++)
+                        {
+                            a[i, j] = r.Next(10);
+                            Console.Write(a[i, j] + " ");
+                        }
+                        Console.WriteLine();
+                    }
+                    //Afisare a doua matrice 
+                    Console.WriteLine("A doua matrice:");
+                    for (long i = 0; i < n; i++)
+                    {
+                        for (long j = 0; j < p; j++)
+                        {
+                            b[i, j] = r.Next(10);
+                            Console.Write(b[i, j] + " ");
+                        }
+                        Console.WriteLine();
+                    }
+                    //Formare submatrici
+
+                    element[] PV = new element[comm.Size];
+                    for (long i = 0; i < comm.Size; i++) // identificator de proces
+                        if (i != comm.Size - 1)
+                        {
+                            long[,] row = new long[m / comm.Size, n];
+                            long[,] col = new long[n, p];
+                            long nr = 0;
+                            for (long j = i * m / comm.Size; j < (i + 1) * m / comm.Size; j++)
+                            {
+                                for (long k = 0; k < n; k++)
+                                {
+                                    row[nr, k] = a[j, k];
+                                }
+                                nr++;
+                            }
+                            col = b;
+                            PV[i].row = row;
+                            PV[i].col = col;
+                            PV[i].l = m / comm.Size;
+                            PV[i].lc = n;
+                            PV[i].c = p;
+                        }
+                        else
+                        {
+                            long[,] row = new long[m - i * m / comm.Size, n];
+                            long[,] col = new long[n, p];
+                            long nr = 0;
+                            for (long j = i * m / comm.Size; j < m; j++)
+                            {
+                                for (long k = 0; k < n; k++)
+                                {
+                                    row[nr, k] = a[j, k];
+                                }
+                                nr++;
+                            }
+                            col = b;
+                            PV[i].row = row;
+                            PV[i].col = col;
+                            PV[i].l = m - i * m / comm.Size;
+                            PV[i].lc = n;
+                            PV[i].c = p;
+                        }
+                    
+                    for (long i = 0; i < comm.Size; i++)
+                    {
+                        Console.WriteLine(PV[i].l); //Afiseaza linii submatrice A
+                        Console.WriteLine(PV[i].lc); //Afiseaza coloane A si linii B
+                        Console.WriteLine(PV[i].c); //Afiseaza Coloane B 
+
+                        // Afisam Submatricea A 
+                        for (long j = 0; j < PV[i].l; j++)
+                        {
+                            for (long k = 0; k < PV[i].lc; k++)
+                                Console.Write(PV[i].row[j, k] + " ");
+                            Console.WriteLine();
+                        }
+                        //Afisam Matricea B
+                        for (long j = 0; j < PV[i].lc; j++)
+                        {
+                            for (long k = 0; k < PV[i].c; k++)
+                                Console.Write(PV[i].col[j, k] + " ");
+                            Console.WriteLine();
+                        }
+                        Console.WriteLine("-------");
+                    }
+                    
+                    DateTime newDate1 = DateTime.Now;
+                    //Calculam produsul si il retinem in matricea C
+                    c = new long[PV[0].l, PV[0].c];
+                    for (long i = 0; i < PV[0].lc; i++)
+                        for (long j = 0; j < PV[0].l; j++)
+                            for (long k = 0; k < PV[0].c; k++)
+                                c[j, k] += PV[0].row[j, i] * PV[0].col[i, k];
+                    
+                    Console.WriteLine("Proces de rang: " + comm.Rank);
+                    for (long i = 0; i < PV[0].l; i++)
+                    {
+                        for (long j = 0; j < PV[0].c; j++)
+                            Console.Write(c[i, j] + " ");
+                        Console.WriteLine();
+                    }
+                    
+                    Console.WriteLine("Rezultat------>>>abc");
+                    comm.Scatter(PV);
+
+                    comm.Barrier();
+
+                    DateTime newDate2 = DateTime.Now;
+                    TimeSpan ts = newDate2 - newDate1;
+                    long difference = ts.Milliseconds;
+                    Console.WriteLine("Time elapsed is:" + difference + " miliseconds");
+
+                }
+                else
+                {   //Pt rank-uri !=0
+                    element e = comm.Scatter<element>(0);
+                    c = new long[e.l, e.c];
+                    for (long i = 0; i < e.lc; i++)
+                        for (long j = 0; j < e.l; j++)
+                            for (long k = 0; k < e.c; k++)
+                                c[j, k] += e.row[j, i] * e.col[i, k];
+                    
+                    Console.WriteLine("===>Proces de rang: " + comm.Rank);
+                    for (long i = 0; i < e.l; i++)
+                    {
+                        for (long j = 0; j < e.c; j++)
+                            Console.Write(c[i, j] + " ");
+                        Console.WriteLine();
+                    }
+                    comm.Barrier();
+
+                    // Matricea Finala este formata din toate liniile calculate de fiecare proces , in ordine , incepand cu Rank-ul 0
+                }
+
+            }
+
+        }
+    }
+}
+
+
+
